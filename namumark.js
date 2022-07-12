@@ -1,700 +1,926 @@
-async function markdown(content, discussion = 0, title = '', flags = '') {
-	// markdown 아니고 namumark
-	flags = flags.split(' ');
-	
-	function parseTable(content) {
-		var data = '\n' + content + '\n';
-		
-		// 캡션없는 표의 셀에 <td> 추가
-		for(let _tr of (data.match(/^(\|\|(((?!\|\|($|\n))[\s\S])*)\|\|)$/gim) || [])) {
-			var tr = _tr.match(/^(\|\|(((?!\|\|($|\n))[\s\S])*)\|\|)$/gim)[0];
-			var otr = tr;
-			var ntr = tr
-				.replace(/^[|][|]/g, '<tr norender><td>')
-				.replace(/[|][|]$/g, '</td></tr>')
-				.replace(/[|][|]/g, '</td><td>')
-				.replace(/\n/g, '<br />');
-			
-			data = data.replace(tr, ntr);
-		}
-		
-		var datarows = data.split('\n');
-		
-		// 캡션없는 표의 시작과 끝을 감싸고, 전체에 적용되는 꾸미기 문법 적용
-		for(let _tr of (data.match(/^(<tr norender><td>(((?!<\/td><\/tr>($|\n))[\s\S])*)<\/td><\/tr>)$/gim) || [])) {
-			var tr = _tr.match(/^(<tr norender><td>(((?!<\/td><\/tr>($|\n))[\s\S])*)<\/td><\/tr>)$/im)[0];
-			
-			if (  // 표의 시작이라면(위에 || 문법 없음)
-				(!((befrow = (datarows[datarows.findIndex(s => s == tr.split('\n')[0]) - 1] || '')).match(/^(<tr><td>(((?!<\/td><\/tr>($|\n))[\s\S])*)<\/td><\/tr>)$/im))) &&  // 이전 줄이 표가 아니면
-				(!(befrow.match(/^(\|(((?!\|).)+)\|(((?!\|\|($|\n))[\s\S])*)\|\|)$/im)))  // 캡션도 아니면
-			) {
-				const fulloptions = (tr.replace(/&lt;((?!table).)*&gt;/g, '').match(/^<tr norender><td>((&lt;([a-z0-9 ]+)=(((?!&gt;).)+)&gt;)+)/i) || ['', ''])[1];
-				var ts = '', trs = '';
-				
-				var alop, align = ((alop = (fulloptions.match(/&lt;table\s*align=(left|center|right)&gt;/))) || ['', 'left'])[1];
-				if(alop) data = data.replace(tr, tr = tr.replace(alop[0], ''));
-				
-				var wiop, width = ((wiop = (fulloptions.match(/&lt;table\s*width=((\d+)(px|%|))&gt;/))) || ['', ''])[1];
-				if(wiop) {
-					data = data.replace(tr, tr = tr.replace(wiop[0], ''));
-					trs += 'width: ' + width + '; ';
-				}
-				
-				var clop, color = ((clop = (fulloptions.match(/&lt;table\s*color=((#[a-fA-F0-9]{3,6})|([a-zA-Z]+))&gt;/))) || ['', ''])[1];
-				if(clop) {
-					data = data.replace(tr, tr = tr.replace(clop[0], ''));
-					trs += 'color: ' + color + '; ';
-				}
-				
-				var bgop, bgcolor = ((bgop = (fulloptions.match(/&lt;table\s*bgcolor=((#[a-fA-F0-9]{3,6})|([a-zA-Z]+))&gt;/))) || ['', ''])[1];
-				if(bgop) {
-					data = data.replace(tr, tr = tr.replace(bgop[0], ''));
-					trs += 'background-color: ' + bgcolor + '; ';
-				}
-				
-				var brop, border = ((brop = (fulloptions.match(/&lt;table\s*bordercolor=((#[a-fA-F0-9]{3,6})|([a-zA-Z]+))&gt;/))) || ['', ''])[1];
-				if(brop) {
-					data = data.replace(tr, tr = tr.replace(brop[0], ''));
-					trs += 'border: 2px solid ' + border + '; ';
-				}
-				
-				if(trs) ts = ' style="' + trs + '"';
-				
-				data = data.replace(tr, '<div class="wiki-table-wrap table-' + align + '"><table class=wiki-table' + ts + '><tbody>\n' + tr);
-				datarows = data.split('\n');
-			} if (  // 표의 끝이라면(아래에 || 문법 없음)
-				!((aftrow = (datarows[datarows.findIndex(s => s == (r = tr.split('\n'))[r.length - 1]) + 1] || '')).match(/^(<tr norender><td>(((?!<\/td><\/tr>($|\n))[\s\S])*)<\/td><\/tr>)$/im))  // 다음 줄이 표가 아니면
-			) {
-				data = data.replace(tr, tr + '\n</tbody></table></div>');
-			}
-			
-			data = data.replace(tr, tr.replace('<tr norender>', '<tr>'));
-			datarows = data.split('\n');
-		}
-		
-		// 캡션있는 표 렌더링
-		for(let _tr of (data.match(/^(\|(((?!\|).)+)\|(((?!\|\|($|\n))[\s\S])*)\|\|)$/gim) || [])) {
-			var tr = _tr.match(/^(\|(((?!\|).)+)\|(((?!\|\|($|\n))[\s\S])*)\|\|)$/im);
-			var ec = '';
-			
-			if (  // 표의 시작이 아니면 건너뛰기
-				((befrow = (datarows[datarows.findIndex(s => s == tr[0].split('\n')[0]) - 1] || '')).match(/^(<tr><td>(((?!<\/td><\/tr>($|\n))[\s\S])*)<\/td><\/tr>)$/im))
-			) continue; if (  // 표의 끝
-				!((aftrow = (datarows[datarows.findIndex(s => s == (r = tr[0].split('\n'))[r.length - 1]) + 1] || '')).match(/^(<tr><td>(((?!<\/td><\/tr>($|\n))[\s\S])*)<\/td><\/tr>)$/im))  // 다음 줄이 표가 아니면
-			) {
-				ec = '\n</tbody></table></div>';
-			}
-			
-			ntr = (
-				('||' + tr[4] + '||')
-				.replace(/^[|][|]/g, '<tr><td>')
-				.replace(/[|][|]$/g, '</td></tr>')
-				.replace(/[|][|]/g, '</td><td>')
-				.replace(/\n/g, '<br />')
-				+ ec
-			);
-			
-			const fulloptions = (ntr.replace(/&lt;((?!table).)*&gt;/g, '').match(/^<tr><td>((&lt;([a-z0-9 ]+)=(((?!&gt;).)+)&gt;)+)/i) || ['', ''])[1];
-				
-			var alop, align = ((alop = (fulloptions.match(/&lt;table\s*align=(left|center|right)&gt;/))) || ['', 'left'])[1];
-			if(alop) data = data.replace(ntr, ntr = ntr.replace(alop[0], ''));
-			
-			var ts = '', trs = '';
-			
-			var wiop, width = ((wiop = (fulloptions.match(/&lt;table\s*width=((\d+)(px|%|))&gt;/))) || ['', ''])[1];
-			if(wiop) {
-				data = data.replace(ntr, ntr = ntr.replace(wiop[0], ''));
-				trs += 'width: ' + width + '; ';
-			}
-			
-			var clop, color = ((clop = (fulloptions.match(/&lt;table\s*color=((#[a-fA-F0-9]{3,6})|([a-zA-Z]+))&gt;/))) || ['', ''])[1];
-			if(clop) {
-				data = data.replace(ntr, ntr = ntr.replace(clop[0], ''));
-				trs += 'color: ' + color + '; ';
-			}
-			
-			var bgop, bgcolor = ((bgop = (fulloptions.match(/&lt;table\s*bgcolor=((#[a-fA-F0-9]{3,6})|([a-zA-Z]+))&gt;/))) || ['', ''])[1];
-			if(bgop) {
-				data = data.replace(ntr, ntr = ntr.replace(bgop[0], ''));
-				trs += 'background-color: ' + bgcolor + '; ';
-			}
-			
-			var brop, border = ((brop = (fulloptions.match(/&lt;table\s*bordercolor=((#[a-fA-F0-9]{3,6})|([a-zA-Z]+))&gt;/))) || ['', ''])[1];
-			if(brop) {
-				data = data.replace(ntr, ntr = ntr.replace(brop[0], ''));
-				trs += 'border: 2px solid ' + border + '; ';
-			}
+function render_namumark(target) {
+    function get_today() {
+        var today_data = new Date();
 
-			if(trs) ts = ' style="' + trs + '"';			
-			
-			data = data.replace(tr[0], '<div class="wiki-table-wrap table-' + align + '"><table class=wiki-table' + ts + '><caption>' + tr[2] + '</caption><tbody>\n' + ntr);
-			datarows = data.split('\n');
-		}
-		
-		// 셀 꾸미기
-		for(let _tr of (data.match(/^<tr>(((?!<\/tr>).)*)<\/tr>$/gim) || [])) {
-			var tr = _tr.match(/^<tr>(((?!<\/tr>).)*)<\/tr>$/im)[1], ntr = tr;
-			
-			for(let td of (tr.match(/<td>(((?!<\/td>).)*)<\/td>/g) || [])) {
-				var text = (td.match(/<td>(((?!<\/td>).)*)<\/td>/) || ['', ''])[1], ot = text, ntd = td;
-				var notx = text.replace(/^((&lt;([a-z0-9():\| -]+)((=(((?!&gt;).)+))*)&gt;)+)/i, '');
-				var attr = '', tds = '', cs = '', rs = '';
-				
-				const fulloptions = (td.replace(/(&lt;table([a-z0-9 ]+)=(((?!&gt;).)+)&gt;)/g, '').match(/^<td>((&lt;([a-z0-9():\|\^ -]+)((=(((?!&gt;).)+))*)&gt;)+)/i) || ['', ''])[1];
-				
-				// 정렬1
-				if(notx.startsWith(' ') && notx.endsWith(' ')) {
-					tds += 'text-align: center; ';
-				}
-				else if(notx.startsWith(' ') && !notx.endsWith(' ')) {
-					tds += 'text-align: right; ';
-				}
-				
-				// 정렬2
-				var align = (fulloptions.match(/&lt;([(]|[:]|[)])&gt;/) || ['', ''])[1];
-				
-				if(align) {
-					tds += 'text-align: ' + (
-						align == '(' ? (
-							'left'
-						) : (
-							align == ')' ? (
-								'right'
-							) : (
-								'center'
-							)
-						)
-					) + '; ';
-					ntd = ntd.replace(/&lt;([(]|[:]|[)])&gt;/, '');
-				}
-				
-				// 너비
-				var width = (fulloptions.match(/&lt;width=((\d+)(px|%|))&gt;/) || ['', ''])[1];
-				if(width) {
-					tds += 'width: ' + width + '; ';
-					ntd = ntd.replace(/&lt;width=((\d+)(px|%|))&gt;/, '');
-				}
-				
-				// 높이
-				var height = (fulloptions.match(/&lt;height=((\d+)(px|%|))&gt;/) || ['', ''])[1];
-				if(height) {
-					tds += 'height: ' + height + '; ';
-					ntd = ntd.replace(/&lt;height=((\d+)(px|%|))&gt;/, '');
-				}
-				
-				// 가로 합치기
-				var colspan = (fulloptions.match(/&lt;[-](\d+)&gt;/) || ['', ''])[1];
-				if(colspan) {
-					cs = colspan;
-					ntd = ntd.replace(/&lt;[-](\d+)&gt;/, '');
-				}
-				
-				// 세로 합치기 & 정렬
-				var rowopt = (fulloptions.match(/&lt;([^]|[v]|)[|](\d+)&gt;/) || ['', '', '']);
-				if(rowopt[2]) {
-					rs = rowopt[2];
-					switch(rowopt[1]) {
-						case '^':
-							tds += 'vertical-align: top; ';
-							break; 
-						case 'v':
-							tds += 'vertical-align: bottom; ';
-					}
-					ntd = ntd.replace(/&lt;([^]|[v]|)[|](\d+)&gt;/, '');
-				}
-				
-				// 셀 배경색
-				var bgcolor = (fulloptions.match(/&lt;((#[a-fA-F0-9]{3,6})|([a-zA-Z]+))&gt;/) || ['', ''])[1];
-				if(bgcolor) {
-					tds += 'background-color: ' + bgcolor + '; ';
-					ntd = ntd.replace(/&lt;((#[a-fA-F0-9]{3,6})|([a-zA-Z]+))&gt;/, '');
-				}
-				
-				// 셀 배경색 2
-				var bgcolor = (fulloptions.match(/&lt;bgcolor=((#[a-fA-F0-9]{3,6})|([a-zA-Z]+))&gt;/) || ['', ''])[1];
-				if(bgcolor) {
-					tds += 'background-color: ' + bgcolor + '; ';
-					ntd = ntd.replace(/&lt;bgcolor=((#[a-fA-F0-9]{3,6})|([a-zA-Z]+))&gt;/, '');
-				}
-				
-				// 글자색
-				var color = (fulloptions.match(/&lt;color=((#[a-fA-F0-9]{3,6})|([a-zA-Z]+))&gt;/) || ['', ''])[1];
-				if(color) {
-					tds += 'color: ' + color + '; ';
-					ntd = ntd.replace(/&lt;color=((#[a-fA-F0-9]{3,6})|([a-zA-Z]+))&gt;/, '');
-				}
-				
-				if(tds) attr += ' style="' + tds + '"';
-				if(cs)  attr += ' colspan=' + cs;
-				if(rs)  attr += ' rowspan=' + rs;
-				ntd = ntd.replace(/<td>/, '<td' + attr + '>');
-				
-				ntr = ntr.replace(td, ntd);
-			}
-			data = data.replace(tr, ntr)
-		}
-		
-		return data
-			.replace(/^\n/, '')
-			.replace(/\n$/, '')
-			.replace(/<tbody>\n/g, '<tbody>')
-			.replace(/\n<\/tbody>/g, '<tbody>')
-			.replace(/<\/tr>\n/g, '</tr>')
-			.replace(/\n<tr>/g, '</tr>')
-			.replace(/<\/tbody><tbody><\/tbody>/g, '</tbody>');
-	}
-	
-	function multiply(a, b) {
-		if(typeof a == 'number') return a * b;
-		
-		var ret = '';
-		for(let i=0; i<b; i++) ret += a;
-		return ret;
-	}
-	
-	var footnotes = new Stack();
-	var blocks    = new Stack();
-	var fndisp    = {};
-	
-	var fnnum  = 1;
-	var fnhtml = '';
-	var cates  = '';
-	var data   = content;
-	var doc    = processTitle(title);
-	
-	data = html.escape(data);
-	const xref = flags.includes('backlinkinit');
-	
-	// 역링크 초기화
-	if(xref)
-		await curs.execute("delete from backlink where title = ? and namespace = ?", [doc.title, doc.namespace]);
-	const xrefl = [];
-	
-	if(!data.includes('\n') && data.includes('\r')) data = data.replace(/\r/g, '\n');
-	if(data.includes('\n') && data.includes('\r')) data = data.replace(/\r\n/g, '\n');
-	
-	// 한 글자 리터럴
-	for(let esc of (data.match(/(?:\\)(.)/g) || [])) {
-		const match = data.match(/(?:\\)(.)/);
-		data = data.replace(esc, '<spannw class=nowiki>' + match[1] + '</spannw>');
-	}
-	
-	// 블록 (접기, CSS, ...)
-	for(let block of (data.match(/([}][}][}]|[{][{][{](((?!}}}).)*)[}][}][}]|[{][{][{](((?!}}}).)*))/gim) || [])) {
-		if(block == '}}}') {
-			if(!blocks.size()) continue;
-			var od = data;
-			data = data.replace('}}}', blocks.top() + '');
-			if(od == data) data = data.replace('\n}}}', blocks.top() + '\r');
-			blocks.pop();
-			continue;
-		}
-		
-		const h = block.match(/{{{(((?!}}}).)*)/im)[1];
-		if(h.match(/^[#][!]folding\s/)) {  // 접기
-			blocks.push('</dd></dl>');
-			const title = h.match(/^[#][!]folding\s(.*)$/)[1];
-			data = data.replace('{{{' + h + '\n', '<dl class=wiki-folding><dt>' + title + '</dt><dd>');
-		} else if(h.match(/^[#][!]wiki\s/)) {  // 위키문법 & CSS
-			blocks.push('</div>');
-			const style = (h.match(/style=&quot;(((?!&quot;).)*)&quot;/) || ['', '', ''])[1];
-			data = data.replace('{{{' + h + '\n', '<div style="' + style.replace(/&amp;quot;/g, '&quot;') + '">');
-		} else if(h.match(/^[#][!]html/) && !discussion) {  // HTML
-			if(block.includes('}}}')) {
-				var rb = block;
-				rb = rb.replace('}}}', '</rawhtml></nowikiblock>');
-				rb = rb.replace('{{{#!html', '<nowikiblock><rawhtml>');
-				data = data.replace(block, rb);
-			} else {
-				blocks.push('</rawhtml></nowikiblock>');
-				data = data.replace('{{{#!html', '<nowikiblock><rawhtml>');
-			}
-		} else {  // 리터럴
-			if(!block.includes('}}}')) {  // 블록
-				blocks.push('</pre></nowikiblock>');
-				var od = data;
-				data = data.replace('{{{\n', '<nowikiblock><pre>');
-				if(od == data) data = data.replace('{{{', '<nowikiblock><pre>');
-			}
-		}
-	}
-	
-	// #!html 문법
-	var { document } = (new JSDOM(data.replace(/\n/g, '<br>'))).window;
-	const whtags = ['br', 'hr', 'div', 'span', 'ul', 'a', 'b', 'strong', 'del', 's', 'ins', 'u', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'font', 'dl', 'dt', 'dd', 'label', 'sup', 'sub'];
-	const whattr = {
-		'*': ['style'],
-		span: ['class'],
-		a: ['href', 'class'],
-		font: ['color', 'size', 'face'],
-	};
-	for(var item of document.querySelectorAll('rawhtml')) {
-		item.innerHTML = item.textContent.replace(/\n/g, '<br>');
-		for(var el of item.getElementsByTagName('*')) {
-			if(whtags.includes(el.tagName.toLowerCase())) {
-				for(var attr of el.attributes) {
-					if(((whattr[el.tagName.toLowerCase()] || []).concat(whattr['*'])).includes(attr.name)) {
-						if(attr.name == 'style') {
-							
-						}
-					} else el.removeAttribute(attr.name);
-				}
-				switch(el.tagName.toLowerCase()) {
-					case 'a':
-						el.setAttribute('target', '_blank');
-						if(minor >= 20) {
-							el.className += (el.className ? ' ' : '') + 'wiki-link-external';
-						}
-				}
-			} else el.outerHTML = el.innerHTML;
-		} item.outerHTML = item.innerHTML;
-	}
-	
-	// 리터럴 (제대로 된 방법은 아니겠지만 이게 젤 쉬었어...)
-	var nwblocks = {};
-	for(var item of document.querySelectorAll('nowikiblock')) {
-		const key = rndval('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+=/', 2048);
-		nwblocks[key] = item.innerHTML;
-		item.outerHTML = key;
-	}
-	data = document.querySelector('body').innerHTML.replace(/<br>/g, '\n');
-	
-	// 인용문
-	function parseQuotes(data) {
-		const rows = data.split(/\n/);
-		const rl = rows.length;
-		var inquote = 0;
-		for(let i=0; i<rl; i++) {
-			let row = rows[i];
-			if(!row.startsWith('&gt;')) {
-				if(inquote) {
-					row = '</blockquotewikiquote>\n' + row;
-					inquote = 0;
-				}
-				rows[i] = row;
-				continue;
-			}
-			if(row.startsWith('&gt;') && !inquote) {
-				row = row.replace(/^[&]gt;(\s*)/, '<blockquotewikiquote class=wiki-quote>\n');
-				inquote = 1;
-			} else {
-				row = row.replace(/^[&]gt;(\s*)/, '');
-				inquote = 1;
-			}
-			rows[i] = row;
-		}
-		if(inquote) rows.push('</blockquotewikiquote>');
-		return rows.join('\n');
-	} do {
-		data = parseQuotes(data);
-	} while(data.match(/^[&]gt;/gim));
-	
-	// 수평줄
-	data = data.replace(/^[-]{4,9}$/gim, '<hr />');
-	data = data.replace(/(\n{0,1})<hr \/>(\n{0,1})/g, '<hr />');
+        return '' +
+            String(today_data.getFullYear()) + '-' + 
+            String(today_data.getMonth() + 1) + '-' + 
+            String(today_data.getDate()) + ' ' + 
+            (today_data.getHours() < 10 ? '0' + String(today_data.getHours()) : String(today_data.getHours())) + ':' + 
+            (today_data.getMinutes() < 10 ? '0' + String(today_data.getMinutes()) : String(today_data.getMinutes())) + ':' + 
+            (today_data.getSeconds() < 10 ? '0' + String(today_data.getSeconds()) : String(today_data.getSeconds())) +
+        '';
+    }
 
-	// 인용문 마지막 처리
-	data = data.replace(/<blockquotewikiquote\sclass[=]wiki[-]quote>\n/g, '<blockquote class=wiki-quote>');
-	data = data.replace(/\n<\/blockquotewikiquote>/g, '</blockquote>');
-	
-	// 목록
-	function parseList(data) {
-		const rows = ('\n' + data + '\n').split(/\n/);
-		const rl = rows.length;
-		var inlist = 0;
-		for(let i=0; i<rl; i++) {
-			let row = rows[i];
-			if(!row.match(/^(\s+)[*]/) && !row.startsWith(' ')) {
-				if(inlist) {
-					row = '</liwikilist></ulwikilist>\n' + row;
-					inlist = 0;
-				}
-				rows[i] = row;
-				continue;
-			}
-			if(row.match(/^(\s{2,})[*]/)) {
-				rows[i] = row.replace(/^(\s{2,})[*]/, ' *');
-				continue;
-			}
-			if(row.startsWith(' *') && !inlist) {
-				row = row.replace(/^\s[*](\s*)/, '<ulwikilist class=wiki-list>\n<liwikilist>\n');
-				inlist = 1;
-			} else {
-				row = row.replace(/^\s/, '');
-				row = row.replace(/^[*](\s*)/, '</liwikilist><liwikilist>\n');
-				inlist = 1;
-			}
-			rows[i] = row;
-		}
-		rows.splice(0, 1);
-		rows.pop();
-		if(inlist) rows.push('</liwikilist>\n</ulwikilist>');
-		return rows.join('\n');
-	} do {
-		data = parseList(data);
-	} while(data.match(/^\s[*]/gim));
-	data = data.replace(/<ulwikilist\sclass[=]wiki[-]list>\n/g, '<ul class=wiki-list>');
-	data = data.replace(/\n<\/ulwikilist>/g, '</ul>');
-	data = data.replace(/<liwikilist>\n/g, '<li>');
-	data = data.replace(/\n<\/liwikilist>/g, '</li>');
-	data = data.replace(/<\/liwikilist>\n<\/ulwikilist>/g, '</ul>');
-	data = data.replace(/<ulwikilist\sclass[=]wiki[-]list>/g, '<ul class=wiki-list>');
-	data = data.replace(/<\/ulwikilist>/g, '</ul>');
-	data = data.replace(/<liwikilist>/g, '<li>');
-	data = data.replace(/<\/liwikilist>/g, '</li>');
-	
-	// 들여쓰기
-	function parseIndent(data) {
-		const rows = data.split(/\n/);
-		const rl = rows.length;
-		var inindent = 0;
-		for(let i=0; i<rl; i++) {
-			let row = rows[i];
-			if(!row.startsWith(' ') || row.replace(/^\s/, '').startsWith('*')) {
-				if(inindent) {
-					row = '</divwikiindent>\n' + row;
-					inindent = 0;
-				}
-				rows[i] = row;
-				continue;
-			}
-			if(row.startsWith(' ') && !inindent) {
-				row = row.replace(/^\s/, '<divwikiindent class=wiki-indent>\n');
-				inindent = 1;
-			} else {
-				row = row.replace(/^\s/, '');
-				inindent = 1;
-			}
-			rows[i] = row;
-		}
-		if(inindent) rows.push('</divwikiindent>');
-		return rows.join('\n');
-	} do {
-		data = parseIndent(data);
-	} while((data.match(/^(\s+)/gim) || []).filter(item => item.replace(/\n/g, '') && item).length);
-	data = data.replace(/<divwikiindent\sclass[=]wiki[-]indent>\n/g, '<div class=wiki-indent>');
-	data = data.replace(/\n<\/divwikiindent>/g, '</div>');
-	
-	// 링크
-	for(let link of (data.match(/\[\[(((?!\]\]).)+)\]\]/g) || [])) {
-		var _dest = link.match(/\[\[(((?!\]\]).)+)\]\]/)[1].replace(/[&]amp[;]/g, '&').replace(/[&]lt[;]/g, '<').replace(/[&]gt[;]/g, '>').replace(/[&]quot[;]/g, '"');
-		var dest, disp;
-		if(_dest.includes('|')) {
-			dest = _dest.split('|')[0];
-			disp = _dest.split('|')[1];
-		} else dest = disp = _dest;
-		
-		const external = dest.startsWith('http://') || dest.startsWith('https://') || dest.startsWith('ftp://');
-		
-		const dd = dest.split('#');
-		if(!external) {
-			if(!dd[0] && dd[1]) dd[0] = title;
-			if(dest == disp) disp = dd[0];
-			dest = dd[0];
-		}
-		
-		var ddata = await curs.execute("select content from documents where title = ? and namespace = ?", [processTitle(dest).title, processTitle(dest).namespace]);
-		const notexist = !ddata.length ? ' not-exist' : '';
-		
-		if(dest.startsWith('분류:') && !discussion) {  // 분류
-			cates += `<li><a href="/w/${encodeURIComponent(dest)}" class="wiki-link-internal${notexist}">${html.escape(dest.replace('분류:', ''))}</a></li>`;
-			if(xref) {
-				curs.execute("insert into backlink (title, namespace, link, linkns, type) values (?, ?, ?, ?, 'category')", [doc.title, doc.namespace, dest.replace('분류:', ''), '분류']);
-			}
-			data = data.replace(link, '');
-			continue;
-		} if(dest.startsWith('파일:') && !discussion && !notexist) {  // 그림
-			// 나중에 구현할랭
-			data = data.replace(link, '');
-			continue;
-		}
-		
-		dest = dest.replace(/^([:]|\s)((분류|파일)[:])/, '$2');
-		
-		const sl = dest == title ? ' self-link' : '';
-		data = data.replace(link, '<a ' + (external ? 'target=_blank ' : '') + 'class="wiki-link-' + (external ? 'external' : 'internal') + '' + sl + notexist + '" href="' + (external ? '' : '/w/') + '' + (external ? html.escape : encodeURIComponent)(dest) + (!external && dd[1] ? html.escape('#' + dd[1]) : '') + '">' + disp + '</a>');
-		
-		// 역링크
-		if(xref && !external) {
-			var linkdoc = processTitle(dest);
-			if(!xrefl.includes(linkdoc.title + '\n' + linkdoc.namespace)) {
-				xrefl.push(linkdoc.title + '\n' + linkdoc.namespace);
-				curs.execute("insert into backlink (title, namespace, link, linkns, type, exist) values (?, ?, ?, ?, 'link', ?)", [doc.title, doc.namespace, linkdoc.title, linkdoc.namespace, notexist ? '0' : '1']);
-			}
-		}
-	}
-	
-	blocks = new Stack;
-	// 삼중중괄호 서식
-	for(let block of (data.match(/([}][}][}]|[{][{][{](((?!}}}).)*)[}][}][}]|[{][{][{](((?!}}}).)*))/gim) || [])) {
-		if(block == '}}}') {
-			if(!blocks.size()) continue;
-			var od = data;
-			data = data.replace('}}}', blocks.top() + '');
-			if(od == data) data = data.replace('\n}}}', blocks.top() + '\r');
-			blocks.pop();
-			continue;
-		}
-		
-		const h = block.match(/{{{(((?!}}}).)*)/im)[1];
-		if(h.match(/^[#][!]folding\s/)) {
-		} else if(h.match(/^[#][!]wiki\s/)) {
-		} else if(h.match(/^[#][!]html/) && !discussion) {
-		} else if(block.includes('}}}')) {  // 한 줄
-			const color = h.match(/^[#]([A-Za-z0-9]+)\s/);
-			const size = h.match(/^([+]|[-])([1-5])\s/);
-			if(color) {  // 글자 색
-				const htmlcolor = color[1].match(/^([A-Fa-f0-9]{3,6})$/);
-				var col = color[1];
-				if(htmlcolor) {
-					col = '#' + htmlcolor[1];
-				}
-				data = data.replace('}}}', '</font>');
-				data = data.replace('{{{' + color[0], '<font color=' + col + '>');
-			} else if(size) {  // 글자 크기
-				data = data.replace('}}}', '</span>');
-				data = data.replace('{{{' + size[0], '<span class="wiki-size size-' + (size[1] == '+' ? 'up' : 'down') + '-' + size[2] + '">');
-			} else {
-				blocks.push('</code></nowikiblock>');
-				data = data.replace('{{{', '<nowikiblock><code>');
-			}
-		}
-	}
-	for(var item of document.querySelectorAll('nowikiblock')) {
-		const key = rndval('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+=/', 2048);
-		nwblocks[key] = item.innerHTML;
-		item.outerHTML = key;
-	}
-	
-	// 토론 앵커
-	if(discussion) for(let res of (data.match(/(\s|^)[#](\d+)(\s|$)/g) || [])) {
-		const reg = res.match(/(\s|^)[#](\d+)(\s|$)/);
-		data = data.replace(res, reg[1] + '<a class=wiki-self-link href="#' + reg[2] + '">#' + reg[2] + '</a>' + reg[3]);
-	}
-	
-	// 문단
-	data = '<div>\r' + data;
-	var maxszz = 2;
-	var headnum = [, 0, 0, 0, 0, 0, 0];
-	var tochtml = '<div class=wiki-macro-toc id=toc>';
-	var cnum = 2;
-	var sec = 1;
-	for(let i=6; i; i--) {
-		if(data.match(RegExp(`^${multiply('=', i)}\\s.*\\s${multiply('=', i)}$`, 'm')))
-			maxszz = i;
-	}
-	for(let heading of (data.match(/^(=\s(((?!=).)*)\s=|==\s(((?!==).)*)\s==|===\s(((?!===).)*)\s===|====\s(((?!====).)*)\s====|=====\s(((?!=====).)*)\s=====|======\s(((?!======).)*)\s======)$/gm) || [])) {
-		const hr = {};
-		for(let i=1; i<=6; i++) {
-			hr[i] = heading.match(RegExp(`^${multiply('=', i)}\\s(((?!${multiply('=', i)}).)*)\\s${multiply('=', i)}$`, 'm'));
-		} for(let i=6; i; i--) if(hr[i]) {
-			if(i < cnum) for(let j=i+1; j<=6; j++) headnum[j] = 0;
-			cnum = i;
-			const title = hr[i][1];
-			var snum = '';
-			for(let j=i; j; j--) if(maxszz == j) {
-				for(let k=j; k<i; k++)
-					snum += headnum[k] + '.';
-				snum += ++headnum[i];
-				break;
-			}
-			var edlnk = '';
-			if(!discussion)
-				edlnk = `<span class=wiki-edit-section><a href="/edit/${encodeURIComponent(doc + '')}?section=${sec++}" rel=nofollow>[편집]</a></span>`;
-			data = data.replace(heading, '</div><h' + i + ' class=wiki-heading><a href="#toc" id="s-' + snum + '">' + snum + '.</a> ' + title + edlnk + '</h' + i + '><div class=wiki-heading-content>');
-			var mt = i;
-			tochtml += multiply('<div class=toc-indent>', mt - maxszz + 1) + '<span class=toc-item><a href="#s-' + snum + '">' + snum + '</a>. ' + title + '</span>' + multiply('</div>', mt - maxszz + 1);
-			break;
-		}
-	}
-	tochtml += '</div>';
-	data += '</div>';
-	data = data.replace(/<div class=wiki[-]heading[-]content>\n/g, '<div class=wiki-heading-content>');
-	
-	// 글자 꾸미기
-	if(minor < 8) data = data.replace(/['][']['][']['](((?![']['][']['][']).)+)[']['][']['][']/g, '<strong><i>$1</i></strong>');
-	data = data.replace(/['][']['](((?![']['][']).)+)[']['][']/g, '<strong>$1</strong>');
-	data = data.replace(/[']['](((?!['][']).)+)['][']/g, '<i>$1</i>');
-	data = data.replace(/~~(((?!~~).)+)~~/g, '<del>$1</del>');
-	data = data.replace(/--(((?!--).)+)--/g, '<del>$1</del>');
-	data = data.replace(/__(((?!__).)+)__/g, '<u>$1</u>');
-	data = data.replace(/[,][,](((?![,][,]).)+)[,][,]/g, '<sub>$1</sub>');
-	data = data.replace(/[^][^](((?![^][^]).)+)[^][^]/g, '<sup>$1</sup>');
-	
-	// 글상자
-	if(minor < 7 || (minor == 7 && revision <= 4))
-		data = data.replace(/{{[|](((?![|]}}).)+)[|]}}/g, '<div class=wiki-textbox>$1</div>');
-	
-	// 매크로
-	data = data.replace(/\[br\]/gi, '&lt;br&gt;');
-	data = data.replace(/\[(date|datetime)\]/gi, generateTime(toDate(getTime()), timeFormat));
-	data = data.replace(/\[(tableofcontents|목차)\]/gi, tochtml);
-	
-	// 각주 (1)
-	const fnrows = data.split('\n');
-	const frl = fnrows.length;
-	for(let fi=0; fi<frl; fi++) {
-		let row = fnrows[fi];
-		for(let fn of (row.match(/(\[[*](((?!\s).)*)\s|\])/g) || [])) {
-			if(fn == ']') {
-				if(!footnotes.size()) continue;
-				row = row.replace(']', '</fnstub>');
-				footnotes.pop();
-				fnrows[fi] = row;
-				continue;
-			}
-			if(!row.includes(']')) continue;
-			const reg = fn.match(/(\[[*](((?!\s).)*)\s|\])/);
-			row = row.replace(fn, '<fnstub' + (reg[2] ? (' name="' + reg[2] + '"') : '') + '>');
-			footnotes.push('[');
-			fnrows[fi] = row;
-		}
-	} data = fnrows.join('\n');
-	
-	// 표렌더
-	var { document } = (new JSDOM(data.replace(/\n/g, '<br>'))).window;
-	function ft(el) {
-		const blks = el.querySelectorAll('dl.wiki-folding > dd, div.wiki-style, blockquote.wiki-quote');
-		if(blks.length) for(let el2 of blks) ft(el2);
-		el = (el == document ? el.querySelector('body') : el);
-		const ihtml = el.innerHTML;
-		el.innerHTML = parseTable(ihtml.replace(/<br>/g, '\n')).replace(/\n/g, '<br>');
-	} ft(document);
-	
-	// 각주 (2)
-	function ff(el) {
-		const blks = el.querySelectorAll('fnstub');
-		if(blks.length) for(let el2 of blks) ff(el2);
-		el = (el == document ? el.querySelector('body') : el);
-		el = el.querySelector('fnstub');
-		if(!el) return;
-		const span = document.createElement('span');
-		span.innerHTML = el.innerHTML;
-		el.outerHTML = `<a ${el.getAttribute('name') ? 'name="' + el.getAttribute('name') + '" ' : ''}class=wiki-fn-content title="${span.textContent}">${el.innerHTML}</a>`;
-	} ff(document);
-	
-	// 각주(3)
-	for(let item of document.querySelectorAll('a.wiki-fn-content')) {
-		const id = item.getAttribute('name') || fnnum;
-		const numid = fnnum;
-		item.removeAttribute('name');
-		item.setAttribute('href', '#fn-' + id);
-		fnhtml += `<span class=footnote-list><span id=fn-${id} class=target></span><a href=#rfn-${numid}>[${id}]</a> ${item.innerHTML}</span>`;
-		item.innerHTML = `<span id=rfn-${numid}>[${id}]`;
-		fnnum++;
-	}
-	
-	if(fnhtml) fnhtml = '<div class=wiki-macro-footnote>' + fnhtml + '</div>';
-	
-	// 한 글자 리터럴 처리
-	for(let item of document.querySelectorAll('spannw.nowiki')) {
-		item.outerHTML = item.innerHTML;
-	}
-	
-	data = document.querySelector('body').innerHTML;
-	data = data.replace(/\r/g, '');
-	data = data.replace(/<br>/g, '\n');
-	
-	if(!discussion) data = '<div class=wiki-inner-content>' + data + '</div>';
-	
-	data = data.replace(/<div>\n/, '<div>').replace(/\n<\/div><h(\d)/g, '</div><h$1').replace(/\n/g, '<br />');
+    function get_link_state(link_data) {            
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", "/api/w/" + encodeURIComponent(link_data[0]) + "?exist=1", true);
+        xhr.send(null);
+        
+        xhr.onreadystatechange = function() {
+            var i = 0;
+            while(1) {
+                if(document.getElementsByClassName(link_data[1])[i]) {
+                    if(this.readyState === 4 && this.status === 200) {
+                        if(JSON.parse(this.responseText)['exist'] !== '1') {
+                            document.getElementsByClassName(link_data[1])[i].id = "not_thing";
+                        } else {
+                            document.getElementsByClassName(link_data[1])[i].id = "";
+                        }
+                    
+                        i += 1;
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
+    function get_file_state(file_data) {            
+        var file_part = file_data[0].match(/^([^.]+)\.(.+)$/);
+        if(file_part) {
+            var file_name = file_part[1];
+            var file_type = '.' + file_part[2];
+        } else {
+            var file_name = file_data;
+            var file_type = '';
+        }
+
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", "/api/sha224/" + encodeURIComponent(file_name), true);
+        xhr.send(null);
+        
+        xhr.onreadystatechange = function() {
+            if(this.readyState === 4 && this.status === 200) {
+                var xhr = new XMLHttpRequest();
+                xhr.open("GET", "/api/w/file:" + encodeURIComponent(file_data[0]) + "?exist=1", true);
+                xhr.send(null);
+
+                var img_src = JSON.parse(this.responseText)['data'];
+                
+                xhr.onreadystatechange = function() {
+                    if(this.readyState === 4 && this.status === 200) {
+                        if(JSON.parse(this.responseText)['exist'] === '1') {
+                            document.getElementById(file_data[1]).innerHTML = '' +
+                                '<img style="' + file_data[2] + '" src="/image/' + img_src + file_type + '">' +
+                            '';
+                        } else {
+                            document.getElementById(file_data[1]).innerHTML = '' +
+                                '<a href="/upload?name=' + encodeURIComponent(file_name) + '" id="not_thing">' + file_data[0] + '</a>' +
+                            '';
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    function divi_link(link_data) {
+        var link_part = link_data.match(/^([^|]+)\|(.+)$/);
+        if(link_part) {
+            return [link_part[2], link_part[1]]
+        } else {
+            return [link_data, link_data]
+        }
+    }
+
+    function table_analysis(main_data, cel_data, start_cel, num = 0) {
+        var table_class = 'class="'
+        
+        var div_style = 'style="'
+        var table_style = 'style="'
+        var cel_style = 'style="'
+        var row_style = 'style="'
+        
+        var row = ''
+        var cel = ''
+
+        var table_state_get = main_data.match(/&lt;table ?width=((?:(?!&gt;).)*)&gt;/);
+        if(table_state_get) {
+            if(main_data.match('^[0-9]+$', table_state_get[1])) {
+                div_style += 'width: ' + table_state_get[1] + 'px;';
+            } else {
+                div_style += 'width: ' + table_state_get[1] + ';';
+            }
+
+            table_style += 'width: 100%;';
+        }
+
+        table_state_get = main_data.match(/&lt;table ?height=((?:(?!&gt;).)*)&gt;/);
+        if(table_state_get) {
+            if(main_data.match(/^[0-9]+$/, table_state_get[1])) {
+                table_style += 'height: ' + table_state_get[1] + 'px;';
+            } else {
+                table_style += 'height: ' + table_state_get[1] + ';';
+            }
+        }
+
+        table_state_get = main_data.match(/&lt;table ?align=((?:(?!&gt;).)*)&gt;/);
+        if(table_state_get) {
+            if(table_state_get[1] == 'right') {
+                div_style += 'float: right;';
+            } else if(table_state_get[1] == 'center') {
+                table_style += 'margin: auto;';
+            }
+        }
+
+        table_state_get = main_data.match(/&lt;table ?textalign=((?:(?!&gt;).)*)&gt;/);
+        if(table_state_get) {
+            num = 1
+
+            if(table_state_get[1] == 'right') {
+                table_style += 'text-align: right;';
+            } else if(table_state_get[1] == 'center') {
+                table_style += 'text-align: center;';
+            }
+        }
+
+        table_state_get = main_data.match(/&lt;row ?textalign=((?:(?!&gt;).)*)&gt;/);
+        if(table_state_get) {
+            if(table_state_get[1] == 'right') {
+                row_style += 'text-align: right;';
+            } else if(table_state_get[1] == 'center') {
+                row_style += 'text-align: center;';
+            } else {
+                row_style += 'text-align: left;';
+            }
+        }
+
+        table_state_get = main_data.match(/&lt;-((?:(?!&gt;).)*)&gt;/);
+        if(table_state_get) {
+            cel = 'colspan="' + table_state_get[1] + '"';
+        } else {
+            cel = 'colspan="' + String(Math.round(start_cel.length / 2)) + '"';
+        }
+
+        table_state_get = main_data.match(/&lt;\|((?:(?!&gt;).)*)&gt;/);
+        if(table_state_get) {
+            row = 'rowspan="' + table_state_get[1] + '"';
+        }
+
+        table_state_get = main_data.match(/&lt;rowbgcolor=(#(?:[0-9a-f-A-F]{3}){1,2}|\w+)(?:,(#(?:[0-9a-f-A-F]{3}){1,2}|\w+))?&gt;/);
+        if(table_state_get) {
+            row_style += 'background: ' + table_state_get[1] + ';';
+        }
+
+        table_state_get = main_data.match(/&lt;rowcolor=(#(?:[0-9a-f-A-F]{3}){1,2}|\w+)(?:,(#(?:[0-9a-f-A-F]{3}){1,2}|\w+))?&gt;/);
+        if(table_state_get) {
+            row_style += 'color: ' + table_state_get[1] + ';';
+        }
+
+        table_state_get = main_data.match(/&lt;table ?bordercolor=(#(?:[0-9a-f-A-F]{3}){1,2}|\w+)(?:,(#(?:[0-9a-f-A-F]{3}){1,2}|\w+))?&gt;/);
+        if(table_state_get) {
+            table_style += 'border: ' + table_state_get[1] + ' 2px solid;';
+        }
+
+        table_state_get = main_data.match(/&lt;table ?bgcolor=(#(?:[0-9a-f-A-F]{3}){1,2}|\w+)(?:,(#(?:[0-9a-f-A-F]{3}){1,2}|\w+))?&gt;/);
+        if(table_state_get) {
+            table_style += 'background: ' + table_state_get[1] + ';';
+        }
+
+        table_state_get = main_data.match(/&lt;table ?color=(#(?:[0-9a-f-A-F]{3}){1,2}|\w+)(?:,(#(?:[0-9a-f-A-F]{3}){1,2}|\w+))?&gt;/);
+        if(table_state_get) {
+            table_style += 'color: ' + table_state_get[1] + ';';
+        }
+
+        table_state_get = main_data.match(/&lt;(?:bgcolor=)?(#(?:[0-9a-f-A-F]{3}){1,2}|\w+)(?:,(#(?:[0-9a-f-A-F]{3}){1,2}|\w+))?&gt;/);
+        if(table_state_get) {
+            cel_style += 'background: ' + table_state_get[1] + ';';
+        }
+
+        table_state_get = main_data.match(/&lt;color=(#(?:[0-9a-f-A-F]{3}){1,2}|\w+)(?:,(#(?:[0-9a-f-A-F]{3}){1,2}|\w+))?&gt;/);
+        if(table_state_get) {
+            cel_style += 'color: ' + table_state_get[1] + ';';
+        }
+
+        table_state_get = main_data.match(/&lt;width=((?:(?!&gt;).)*)&gt;/);
+        if(table_state_get) {
+            if(table_state_get[1].match(/^[0-9]+$/)) {
+                cel_style += 'width: ' + table_state_get[1] + 'px;';
+            } else {
+                cel_style += 'width: ' + table_state_get[1] + ';';
+            }
+        }
+
+        table_state_get = main_data.match(/&lt;height=((?:(?!&gt;).)*)&gt;/);
+        if(table_state_get) {
+            if(table_state_get[1].match(/^[0-9]+$/)) {
+                cel_style += 'height: ' + table_state_get[1] + 'px;';
+            } else {
+                cel_style += 'height: ' + table_state_get[1] + ';';
+            }
+        }
+
+        var text_right = main_data.match(/&lt;\)&gt;/);
+        var text_center = main_data.match(/&lt;:&gt;/);
+        var text_left = main_data.match(/&lt;\(&gt;/);
+        if(text_right) {
+            cel_style += 'text-align: right;';
+        } else if(text_center) {
+            cel_style += 'text-align: center;';
+        } else if(text_left) {
+            cel_style += 'text-align: left;';
+        } else if(num == 0) {
+            if(cel_data.match(/^ /) && cel_data.match(/ $/)) {
+                cel_style += 'text-align: center;';
+            } else if(cel_data.match(/^ /)) {
+                cel_style += 'text-align: right;';
+            } else if(cel_data.match(/ $/)) {
+                cel_style += 'text-align: left;';
+            }
+        }
+
+        table_state_get = main_data.match(/&lt;table ?class=((?:(?!&gt;).)+)&gt;/);
+        if(table_state_get) {
+            table_class += table_state_get[1];
+        }
+
+        div_style += '"';
+        table_style += '"';
+        cel_style += '"';
+        row_style += '"';
+
+        table_class += '"';
+
+        return [table_style, row_style, cel_style, row, cel, table_class, num, div_style]
+    }
+
+    function table_render(data) {
+        var table_num = 0;
+        while(1) {
+            var table_data = data.match(/\n((?:(?:(?:(?:\|\|)+(?:(?:(?!\|\|).(?:\n)*)*))+)\|\|(?:\n)?)+)/);
+            if(table_data) {
+                table_data = table_data[1];
+                
+                var get_table_data = table_data.match(/^((?:\|\|)+)((?:&lt;(?:(?:(?!&gt;).)+)&gt;)*)\n*((?:(?!\|\|).\n*)*)/);
+                if(get_table_data) {
+                    table_return_data = table_analysis(get_table_data[2], get_table_data[3], get_table_data[1]);
+                    table_num = table_return_data[6];
+    
+                    table_data = table_data.replace(
+                        /^((?:\|\|)+)((?:&lt;(?:(?:(?!&gt;).)+)&gt;)*)\n*/,
+                        '\n' + 
+                        '<div class="table_safe" ' + table_return_data[7] + '>' + 
+                            '<table ' + table_return_data[5] + ' ' + table_return_data[0] + '>' + 
+                                '<tr ' + table_return_data[1] + '>' + 
+                                    '<td ' + table_return_data[2] + ' ' + table_return_data[3] + ' ' + table_return_data[4] + '>'
+                    );
+                }
+    
+                table_data = table_data.replace(/\|\|\n?$/, '</td></tr></table></div>');
+    
+                while(1) {
+                    get_table_data = table_data.match(/\|\|\n((?:\|\|)+)((?:&lt;(?:(?:(?!&gt;).)+)&gt;)*)\n*((?:(?!\|\||<\/td>).\n*)*)/);
+                    if(get_table_data) {
+                        table_return_data = table_analysis(get_table_data[2], get_table_data[3], get_table_data[1], table_num);
+    
+                        table_data = table_data.replace(
+                            /\|\|\n((?:\|\|)+)((?:&lt;(?:(?:(?!&gt;).)+)&gt;)*)\n*/,
+                            '</td></tr><tr ' + table_return_data[1] + '><td ' + table_return_data[2] + ' ' + table_return_data[3] + ' ' + table_return_data[4] + '>'
+                        );
+                    } else {
+                        break;
+                    }
+                }
+    
+                while(1) {
+                    get_table_data = table_data.match(/((?:\|\|)+)((?:&lt;(?:(?:(?!&gt;).)+)&gt;)*)\n*((?:(?:(?!\|\||<\/td>).)|\n)*\n*)/);
+                    if(get_table_data) {
+                        table_return_data = table_analysis(get_table_data[2], get_table_data[3].replace(/\n/g, ' '), get_table_data[1], table_num);
+    
+                        table_data = table_data.replace(
+                            /((?:\|\|)+)((?:&lt;(?:(?:(?!&gt;).)+)&gt;)*)\n*/,
+                            '</td><td ' + table_return_data[2] + ' ' + table_return_data[3] + ' ' + table_return_data[4] + '>'
+                        );
+                    } else {
+                        break;
+                    }
+                }
+    
+                data = data.replace(/\n((?:(?:(?:(?:\|\|)+(?:(?:(?!\|\|).(?:\n)*)*))+)\|\|(?:\n)?)+)/, table_data);
+            } else {
+                break;
+            }
+        }
+
+        return data;
+    }
+
+    var data = '\n' + document.getElementById(target).innerHTML + '\n';
+    var title = window.location.pathname.replace(/^\/w\//, '');
+
+    var math_list = [];
+    var math_num = 0;
+    data = data.replace(/\[math\(((?:(?!\)]).)+)\)]/ig, function(all, in_data) {
+        var math_data = in_data.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/&#039;/g, "'");
+
+        math_num += 1;
+        math_list.push(['math_' + String(math_num), math_data]);
+
+        return '<span id="math_' + String(math_num) + '"></span>';
+    });
+
+    var mid_num = 0;
+    var mid_stack = 0;
+    var mid_list = [];
+    var html_num = 0;
+    var fol_num = 0;
+    var mid_regex = /(?:{{{(?:((?:(?! |{{{|}}}|&lt;).)*) ?)|(?:}}}))/;
+    while(1) {
+        var all_mid_data = data.match(mid_regex);
+        if(all_mid_data) {
+            var all = all_mid_data[0];
+            var in_data = all_mid_data[1];
+
+            if(all === '}}}') {
+                if(mid_stack > 0) {
+                    mid_stack -= 1;
+                }
+
+                if(mid_stack > 0) {
+                    data = data.replace(mid_regex, '</mid>');
+                } else {
+                    if(mid_num > 0) {
+                        mid_num -= 1;
+                    }
+
+                    if(!mid_list[mid_num]) {
+                        var return_data = '';
+                    } else if(mid_list[mid_num] === 'pre') {
+                        var return_data = '</code></pre>';
+                    } else if(mid_list[mid_num] === 'div_2') {
+                        var return_data = '</div_1></div>';
+                    } else {
+                        var return_data = '</' + mid_list[mid_num] + '>';
+                    }
+
+                    if(return_data !== '') {
+                        mid_list.splice(mid_num, 1);
+
+                        data = data.replace(mid_regex, return_data);
+                    } else {
+                        data = data.replace(mid_regex, '</mid>');
+                    }
+                }
+            } else {
+                if(mid_stack > 0) {
+                    mid_stack += 1;
+
+                    data = data.replace(mid_regex, all.replace('{{{', '<mid>'));
+                } else {
+                    mid_num += 1;
+
+                    if(in_data.match(/^(#|@|\+|\-)/) && !in_data.match(/^(#|@|\+|\-){2}|(#|@|\+|\-)\\\\/)) {                    
+                        if(in_data.match(/^((#|@)([0-9a-f-A-F]{3}){1,2})/)) {
+                            mid_list.push('span');
+
+                            if(in_data.match(/^#/)) {
+                                data = data.replace(mid_regex, '<span style="color: ' + in_data + ';">');
+                            } else {
+                                data = data.replace(mid_regex, '<span style="background: ' + in_data + ';">');
+                            }
+                        } else if(in_data.match(/^((#|@)(\w+))/)) {
+                            mid_list.push('span');
+
+                            if(in_data.match(/^#/)) {
+                                data = data.replace(mid_regex, '<span style="color: ' + in_data.replace(/^#/, '') + ';">');
+                            } else {
+                                data = data.replace(mid_regex, '<span style="background: ' + in_data.replace(/^@/, '') + ';">');
+                            }
+                        } else if(in_data.match(/^(\+|-)([1-5])/)) {
+                            mid_list.push('span');
+
+                            var font_size_data = in_data.match(/^(\+|-)([1-5])/);
+                            if(font_size_data[1] == '+') {
+                                font_size_data = String(Number(font_size_data[2]) * 20 + 100);
+                            } else {
+                                font_size_data = String(100 - Number(font_size_data[2]) * 10);
+                            }
+
+                            data = data.replace(mid_regex, '<span style="font-size: ' + font_size_data + '%;">');
+                        } else if(in_data.match(/#!wiki/i)) {
+                            mid_list.push('div_1');
+
+
+                            var div_style_data = data.match(/{{{#!wiki(?: style=([^\n]+))?\n?/i);
+                            if(!div_style_data[1]) {
+                                div_style_data = '';
+                            } else {
+                                div_style_data = div_style_data[1];
+                                console.log(div_style_data);
+
+                                div_style_data = div_style_data.replace(/('|")/g, '');
+                                div_style_data = div_style_data.replace(/position/ig, '');
+                            }
+
+                            data = data.replace(/{{{#!wiki(?: style=([^\n]+))?\n?/i, '<div id="wiki_div" style="' + div_style_data + '">');
+                        } else if(in_data.match(/#!syntax/i)) {
+                            mid_list.push('pre');
+                            mid_stack += 1;
+
+                            var syntax_data = data.match(/{{{#!syntax(?: ([^\n]+))?\n?/i);
+                            if(!syntax_data[1]) {
+                                syntax_data = 'python';
+                            } else {
+                                syntax_data = syntax_data[1];
+                            }
+                            
+                            data = data.replace(/{{{#!syntax(?: ([^\n]+))?\n?/i, '<pre id="syntax"><code class="' + syntax_data + '">');
+                        } else if(in_data.match(/#!folding/i)) {
+                            mid_list.push('div_2');
+
+                            var fol_data = data.match(/{{{#!folding(?: ([^\n]+))?\n?/i);
+                            if(!fol_data[1]) {
+                                fol_data = 'TEST';
+                            } else {
+                                fol_data = fol_data[1];
+                            }
+                            
+                            fol_num += 1;
+                            
+                            data = data.replace(/{{{#!folding( ([^\n]+))?\n?/i, '' +
+                                fol_data +
+                                '<div style="display: inline-block;">' + 
+                                    '<a href="javascript:void(0);" onclick="do_open_folding(\'folding_' + String(fol_num) + '\', this);">' +
+                                        '[+]' +
+                                    '</a>' +
+                                '</div>' +
+                                '<div id="folding_' + String(fol_num) + '" style="display: none;">' +
+                                    '<div id="wiki_div" style="">' +
+                            '');
+                        } else if(in_data.match(/#!html/i)) {
+                            mid_list.push('span');
+                            html_num += 1;
+
+                            data = data.replace(mid_regex, '<span id="html_render_contect_' + String(html_num) + '">');
+                        } else {
+                            mid_list.push('code');
+                            mid_stack += 1;
+        
+                            data = data.replace(mid_regex, '<code>' + in_data);
+                        }
+                    } else {
+                        mid_list.push('code');
+                        mid_stack += 1;
+
+                        data = data.replace(mid_regex, '<code>' + in_data);
+                    }
+                }
+            }
+        } else {
+            break;
+        }
+    }
+
+    data = data.replace(/<mid>/g, '{{{');
+    data = data.replace(/<\/mid>/g, '}}}');
+    data = data.replace(/<\/div> *\n/ig, '</div>');
+
+    var nowiki_num = 0;
+    var nowiki_list = {};
+    data = data.replace(/<code( (?:class="(?:[^"]+)"))?>(\n*((?:(?!<\/code>).)+\n*)+)<\/code>/g, function(all, class_data, in_data) {
+        nowiki_num += 1;
+        nowiki_list['nowiki_' + String(nowiki_num)] = in_data;
+
+        if(class_data) {
+            return '<code' + class_data + '><span id="nowiki_' + String(nowiki_num) + '"></span></code>';
+        } else {
+            return '<span id="nowiki_' + String(nowiki_num) + '"></span>';
+        }
+    });
+
+    data = data.replace(/\r\n/g, '\n');
+    data = data.replace(/&amp;/g, '&');
+
+    data = data.replace(/\n(?: +)\|\|/g, '\n||');
+    data = data.replace(/\|\|(?: +)\n/g, '||\n');
+
+    data = data.replace(/\n##(?:(?:(?!\n).)+)/g, '');
+
+    while(1) {
+        wiki_table_data = data.match(/<div id="wiki_div"( (?:[^>]*))>((?:(?:\n| )*)(?:(?!<div id="wiki_div"|<\/div_1>).\n*)+)<\/div_1>/i);
+        if(wiki_table_data) {
+            if(wiki_table_data[2].match(/\|\|/)) {
+                var end_table_render = table_render('\n' + wiki_table_data[2] + '\n').replace(/^\n/, '').replace(/\n$/, '');
+            } else {
+                var end_table_render = wiki_table_data[2];
+            }
+
+            data = data.replace(
+                /<div id="wiki_div"( (?:[^>]*))>((?:(?:\n| )*)(?:(?!<div id="wiki_div"|<\/div_1>).\n*)+)<\/div_1>/i, 
+                '<div' + wiki_table_data[1] + '>' + end_table_render + '</div>'
+            );
+        } else {
+            break;
+        }
+    }
+ 
+    data = data.replace(/<\/td>/g, '</td_1>');
+
+    data = data.replace(/~~((?:(?!~~).)+)~~/g, '<s>$1</s>');
+    data = data.replace(/--((?:(?!--).)+)--/g, '<s>$1</s>');
+    data = data.replace(/__((?:(?!__).)+)__/g, '<u>$1</u>');
+    data = data.replace(/'''((?:(?!''').)+)'''/g, '<b>$1</b>');
+    data = data.replace(/''((?:(?!'').)+)''/g, '<i>$1</i>');
+    data = data.replace(/\^\^((?:(?!\^\^).)+)\^\^/g, '<sup>$1</sup>');
+    data = data.replace(/,,((?:(?!,,).)+),,/g, '<sub>$1</sub>');
+
+    var toc_array = [0, 0, 0, 0, 0, 0];
+    var before_data = 0;
+    var edit_number = 0;
+    var toc_data = '<div id="toc"><span id="toc_title">TOC</span>\n\n'
+    data = data.replace(/\n(={1,6}) ?([^\n]+) (?:={1,6})/g, function(all, num, in_data) {
+        num = num.length;
+        edit_number += 1;
+        
+        if(before_data > num) {
+            var i = num;
+            while(1) {
+                if(i == 6) {
+                    break;
+                }
+
+                toc_array[i] = 0;
+                i += 1;
+            }
+        }
+
+        before_data = num;
+        toc_array[num - 1] += 1;
+        num = String(num);
+        var toc_num = (toc_array.join('.') + '.').replace(/0\./g, '');
+        if(!toc_num.match(/\./)) {
+            toc_num += '0.';
+        }
+
+        toc_data += '' + 
+            '<span style="margin-left: ' + String(10 * (toc_num.length / 2) - 10) + 'px;">' + 
+                '<a href="#s-' + toc_num.replace(/\.$/, '') + '">' + toc_num + '</a> ' + in_data + 
+            '</span>' +
+            '\n' + 
+        '';
+
+        return '' +
+            '\n' +
+            '<h' + num + ' id="s-' + toc_num.replace(/\.$/, '') + '">' +
+                '<a href="#toc">' + toc_num + '</a> ' + in_data +
+                '<span style="font-size: 12px">' +
+                    '<a href="/edit/' + title + '?section=' + String(edit_number) + '">(Edit)</a>' +
+                '</span>' +
+            '</h' + num + '>' +
+        '';
+    });
+
+    toc_data += '</div>';
+    data = data.replace(/<\/h([0-9])>\n/g, '</h$1>');
+
+    while(1) {
+        if(data.match(/(\n(?:&gt; ?(?:[^\n]+)?\n?)+)/)) {
+            data = data.replace(/(\n(?:&gt; ?(?:[^\n]+)?\n?)+)/, function(all, in_data) {
+                var new_in_data = in_data;
+                new_in_data = new_in_data.replace(/^\n&gt; ?/, '');
+                new_in_data = new_in_data.replace(/\n&gt; ?/g, '\n');
+                new_in_data = new_in_data.replace(/\n$/, '');
+
+                return '\n<blockquote>' + new_in_data + '</blockquote>\n';
+            });
+        } else {
+            break;
+        }
+    }
+
+    while(1) {
+        if(data.match(/\n-{4,9}\n/)) {
+            data = data.replace(/\n-{4,9}\n/, function() {
+                return '\n<hr>\n';
+            });
+        } else {
+            break;
+        }
+    }
+
+    data = data.replace(/(\n +\* ?(?:(?:(?!\|\|).)+))\|\|/g, '$1\n ||');
+
+    data = data.replace(/\n( {1,})\* ([^\n]+)/g, function(all, margin_data, in_data) {
+        return '<li style="margin-left: ' + String(margin_data.length * 20) + 'px;">' + in_data + '</li>'
+    });
+    data = data.replace(/\|\|<li/g, '||\n<li');
+
+    data = data.replace(/\n( {1,})/g, function(all, margin_data) {
+        return '\n<span style="margin-left: ' + String(margin_data.length * 10) + 'px"></span>'
+    });
+
+    data = table_render(data);
+
+    var link_list = [];
+    var file_list = [];
+    var link_num = 0;
+    var file_num = 0;
+    var category = ''
+    while(1) {
+        if(data.match(/\[\[((?:(?!\[\[|]]).)+)]]/)) {
+            data = data.replace(/\[\[((?:(?!\[\[|]]).)+)]]/, function(all, in_data) {
+                if(in_data.match(/^(?:category|분류):/i)) {
+                    var back_data = in_data.replace(/^(?:category|분류):/i, '');
+                    var front_data = back_data;
+                    back_data = 'category:' + back_data.replace(/#blur$/, '');
+                    
+                    if(front_data.match(/#blur$/)) {
+                        front_data = '#blur';
+                    }
+
+                    link_list.push([back_data, 'link_' + String(link_num)]);
+                    link_num += 1;
+
+                    if(category === '') {
+                        category += '<div id="cate_all"><hr><div id="cate">Category : '
+                    }
+
+                    category += '<a class="link_' + String(link_num - 1) + '" href="' + encodeURIComponent(back_data) + '">' + front_data + '</a> | ';
+
+                    return '';
+                } else if(in_data.match(/^(?:file|파일):/i)) {
+                    if(in_data.match(/\|/)) {
+                        var file_name = in_data.replace(/^(?:file|파일):/i, '');
+                        file_name = file_name.match(/^([^|]+)/)[1];
+                    } else {
+                        var file_name = in_data.replace(/^(?:file|파일):/i, '');
+                    }
+
+                    var file_style = '';
+                    
+                    var file_state = in_data.match(/\|width=([^|]+)/);
+                    if(file_state) {
+                        file_style += 'width:' + file_state[1];
+                    }
+
+                    file_state = in_data.match(/\|height=([^|]+)/);
+                    if(file_state) {
+                        file_style += 'height:' + file_state[1];
+                    }
+
+                    file_list.push([file_name, 'file_' + String(file_num), file_style]);
+                    file_num += 1;
+                    
+                    return '<span id="file_' + String(file_num - 1) + '"></span>';
+                } else if(in_data.match(/^http(?:s)?:\/\//i)) {
+                    var link_part = divi_link(in_data);
+                    
+                    var front_data = link_part[0];
+                    var back_data = link_part[1];
+
+                    return '<a id="out_link" href="' + back_data + '">' + front_data + '</a>'; 
+                } else {
+                    var link_part = divi_link(in_data.replace(/^:/, ''));
+                    
+                    var front_data = link_part[0];
+                    var back_data = link_part[1];
+
+                    link_list.push([back_data, 'link_' + String(link_num)]);
+                    link_num += 1;
+
+                    return '<a class="link_' + String(link_num - 1) + '" href="/w/' + encodeURIComponent(back_data) + '">' + front_data + '</a>'; 
+                }
+            });
+        } else {
+            break;
+        }
+    }
+
+    if(category !== '') {
+        category = category.replace(/ \| $/, '') + '</div></div>'
+    }
+
+    data = data.replace(/\[([^(\]]+)\(((?:(?!\)]).)+)\)]/g, function(all, name, in_data) {
+        if(name.match(/^youtube|kakaotv|nicovideo$/i)) {
+            var video_code = in_data.match(/^([^,]+)/);
+            if(video_code) {
+                video_code = video_code[1];
+            } else {
+                video_code = 'test';
+            }
+
+            if(name === 'youtube') {
+                var video_src = 'https://www.youtube.com/embed/' + video_code
+            } else if(name === 'kakaotv') {
+                var video_src = 'https://tv.kakao.com/embed/player/cliplink/' + video_code +'?service=kakao_tv'
+            } else {
+                var video_src = 'https://embed.nicovideo.jp/watch/' + video_code
+            }
+
+            var width_data = in_data.match(/, *width=([^,]+)/);
+            if(width_data) {
+                width_data = width_data[1];
+            } else {
+                width_data = '560';
+            }
+
+            var height_data = in_data.match(/, *height=([^,]+)/);
+            if(height_data) {
+                height_data = height_data[1];
+            } else {
+                height_data = '315';
+            }
+
+            return '' +
+                '<iframe ' +
+                    'width="' + width_data + '" ' +
+                    'height="' + height_data + '" ' +
+                    'src="' + video_src + '" ' +
+                    'allowfullscreen>' +
+                '</iframe>' +
+            '';
+        } else if(name.match(/^ruby$/i)) {
+            var main_text = in_data.match(/^([^,]+)/);
+            if(main_text) {
+                main_text = main_text[1];
+            } else {
+                main_text = 'test';
+            }
+
+            var ruby_text = in_data.match(/, *ruby=([^,]+)/);
+            if(ruby_text) {
+                ruby_text = ruby_text[1];
+            } else {
+                ruby_text = 'test';
+            }
+
+            var color_text = in_data.match(/, *color=([^,]+)/);
+            if(color_text) {
+                color_text = 'color:' + color_text[1];
+            } else {
+                color_text = '';              
+            }
+
+            return '' +
+                '<ruby>' +
+                    main_text +
+                    '<rp>(</rp>' +
+                    '<rt>' +
+                        '<span style="' + color_text + '">' + ruby_text + '</span>' +
+                    '</rt>' +
+                    '<rp>)</rp>' +
+                '</ruby>' +
+            '';
+        } else if(name.match(/^anchor$/i)) {
+            return '<span id="' + in_data + '"></span>';
+        } else {
+            return all;
+        }
+    });
+
+    data = data.replace(/\[([^\]]+)\]/g, function(all, name) {
+        if(name.match(/^br$/i)) {
+            return '\n'
+        } else if(name.match(/^목차|tableofcontents$/i)) {
+            return toc_data;
+        } else if(name.match(/^date|datetime$/i)) {
+            return get_today();
+        } else {
+            return all;
+        }
+    });
+
+    var ref_num = 0;
+    var ref_data = '';
+    var name_ref_data = {};
+    while(1) {
+        if(data.match(/(?:\[\*([^ \]]*)(?: ((?:(?!\[\*|\]).)+))?\]|\[(?:각주|footnote)])/)) {
+            data = data.replace(/(?:\[\*([^ \]]*)(?: ((?:(?!\[\*|\]).)+))?\]|\[(?:각주|footnote)])/, function(all, name_data, in_data) {
+                if(ref_num === 0) {
+                    ref_data += '<hr><ul id="footnote_data">';
+                }
+
+                if(all.match(/^\[(?:각주|footnote)]$/i)) {
+                    var new_ref_data = ref_data;
+                    ref_data = '<hr><ul id="footnote_data">';
+                    
+                    return new_ref_data + '</ul>';
+                } else {
+                    ref_num += 1;
+                    var fn_num = String(ref_num);
+
+                    if(name_data) {
+                        if(in_data) {
+                            var fn_data = in_data;
+                            var fn_name = name_data;
+                            name_ref_data[name_data] = fn_data;
+                        } else {
+                            var fn_name = name_data;
+                            if(name_ref_data[name_data]) {
+                                var fn_data = name_ref_data[name_data];
+                            } else {
+                                var fn_data = '';
+                            }
+                        }
+                    } else {
+                        var fn_name = fn_num;
+                        var fn_data = in_data;
+                    }
+
+                    ref_data += '' +
+                        '<li>' +
+                            '<a id="cfn-' + fn_num + '" ' +
+                                'href="#rfn-' + fn_num + '" ' +
+                                'onclick="do_open_foot(\'fn-' + fn_num + '\', 1);">' +
+                                '(' + fn_name + ')' +
+                            '</a> ' + fn_data +
+                        '</li>' +
+                    ''
+
+                    if(name_data) {
+                        fn_name = name_data;
+                    } else {
+                        fn_name = fn_num;
+                    }
+
+                    return '' +
+                        '<sup>' +
+                            '<a href="#fn-' + fn_num + '" ' +
+                                'id="rfn-' + fn_num + '" ' +
+                                'onclick="do_open_foot(\'fn-' + fn_num + '\');">' +
+                                '(' + fn_name + ')' +
+                            '</a>' +
+                        '</sup>' +
+                    '';
+                }
+            });
+        } else {
+            break;
+        }
+    }
+
+    if(ref_data !== '') {
+        data += ref_data + '</ul>';
+    }
+
+    var i = 1;
+    while(1) {
+        if(nowiki_list['nowiki_' + String(i)]) {
+            data = data.replace('<span id="nowiki_' + String(i) + '"></span>', '<code>' + nowiki_list['nowiki_' + String(i)] + '</code>');
+
+            i += 1;
+        } else {
+            break;
+        }
+    }
+
+    data = data.replace(/<\/td_1>/g, '</td>');
+
+    data = data.replace(/^(\n| )+/g, '');
+    data = data.replace(/(\n| )+$/g, '');
+    data = data.replace(/\n/g, '<br>');
+
+    data = data.replace(/&amp;/g, '&');
+    data += category;
+
+    document.getElementById(target).innerHTML = data;
+
+    i = 0;
+    while(1) {
+        if(math_list[i]) {
+            try {
+                katex.render(math_list[i][1], document.getElementById(math_list[i][0]));
+            } catch {
+                try {
+                    document.getElementById(math_list[i][0]).innerHTML = '<span style="color: red;">' + math_list[i][1] + '</span>';
+                } catch {}
+            }
+
+            i += 1;
+        } else {
+            break;
+        }
+    }
+
+    i = 0;
+    while(1) {
+        if(link_list[i]) {
+            get_link_state(link_list[i]);
+
+            i += 1;
+        } else {
+            break;
+        }
+    }
+
+    i = 0;
+    while(1) {
+        if(file_list[i]) {
+            get_file_state(file_list[i]);
+
+            i += 1;
+        } else {
+            break;
+        }
+    }
+
+    console.log('render end')
+    hljs.initHighlightingOnLoad();
+    render_html("html_render_contect");    
+
+    // v0.0.8
+    // 나무위키 새로 생긴 문법 반영 필요
+    // code 버그 확인 필요
+}
